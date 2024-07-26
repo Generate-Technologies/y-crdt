@@ -299,7 +299,7 @@ where
     P: SharedRef + Array,
 {
     /// Returns an iterator over [Out]s existing in a scope of the current [WeakRef] quotation
-    /// range.  
+    /// range.
     pub fn unquote<'a, T: ReadTxn>(&self, txn: &'a T) -> Unquote<'a, T> {
         if let Some(source) = self.try_source() {
             source.unquote(txn)
@@ -361,7 +361,7 @@ where
     P: SharedRef + Array,
 {
     /// Returns an iterator over [Out]s existing in a scope of the current [WeakPrelim] quotation
-    /// range.  
+    /// range.
     pub fn unquote<'a, T: ReadTxn>(&self, txn: &'a T) -> Unquote<'a, T> {
         self.source.unquote(txn)
     }
@@ -870,7 +870,6 @@ mod test {
 
     use arc_swap::ArcSwapOption;
 
-    use crate::branch::BranchPtr;
     use crate::test_utils::exchange_updates;
     use crate::types::text::YChange;
     use crate::types::weak::{WeakPrelim, WeakRef};
@@ -880,6 +879,30 @@ mod test {
         Array, ArrayRef, DeepObservable, Doc, GetString, Map, MapPrelim, MapRef, Observable,
         Quotable, Text, TextRef, Transact, XmlTextRef,
     };
+
+    #[test]
+    fn link_variants() {
+        /*
+          Structure:
+            - map_root
+            - map_a
+                - value_a (int)
+                - link_a (-> map_b)
+            - map_b
+                - value_b (int)
+        */
+        let doc = Doc::new();
+        let map_root = doc.get_or_insert_map("map_root");
+        let mut txn = doc.transact_mut();
+
+        let map_a = map_root.insert(&mut txn, "map_a", MapPrelim::default());
+        let map_b = map_root.insert(&mut txn, "map_b", MapPrelim::default());
+        map_a.insert(&mut txn, "value_a", 7);
+        map_b.insert(&mut txn, "value_b", 14);
+
+        let weak_link = map_b.link(&txn, "value_b").unwrap();
+        map_a.insert(&mut txn, "link_a", weak_link);
+    }
 
     #[test]
     fn basic_map_link() {
