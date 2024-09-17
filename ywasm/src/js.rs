@@ -16,6 +16,7 @@ use std::sync::Arc;
 use wasm_bindgen::__rt::RefMut;
 use wasm_bindgen::convert::{FromWasmAbi, IntoWasmAbi};
 use wasm_bindgen::JsValue;
+use wasm_bindgen::prelude::wasm_bindgen;
 use yrs::block::{EmbedPrelim, ItemContent, Prelim, Unused};
 use yrs::branch::{Branch, BranchPtr};
 use yrs::types::xml::XmlPrelim;
@@ -27,6 +28,12 @@ use yrs::{
     Any, ArrayRef, BranchID, Doc, Map, MapRef, Origin, Out, Text, TextRef, TransactionMut, WeakRef,
     Xml, XmlElementRef, XmlFragment, XmlFragmentRef, XmlOut, XmlTextRef,
 };
+
+#[wasm_bindgen(module = "/js/reflection.js")]
+extern "C" {
+    #[wasm_bindgen(js_name = getTypeJs)]
+    fn get_type_js(target: &JsValue) -> u8;
+}
 
 #[repr(transparent)]
 pub struct Js(JsValue);
@@ -50,9 +57,9 @@ impl Js {
     }
 
     pub fn get_type(js: &JsValue) -> crate::Result<u8> {
-        let tag = js_sys::Reflect::get(js, &JsValue::from_str("type"))?;
-        if let Some(tag) = tag.as_f64() {
-            Ok(tag as u8)
+        let tag = get_type_js(js);
+        if tag != 255 {
+            Ok(tag)
         } else {
             Err(js.clone())
         }
