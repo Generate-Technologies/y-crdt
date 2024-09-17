@@ -14,7 +14,7 @@ use std::convert::TryInto;
 use std::ops::{Deref, RangeBounds};
 use std::sync::Arc;
 use wasm_bindgen::__rt::RefMut;
-use wasm_bindgen::convert::{FromWasmAbi, IntoWasmAbi};
+use wasm_bindgen::convert::{FromWasmAbi, IntoWasmAbi, RefMutFromWasmAbi};
 use wasm_bindgen::JsValue;
 use wasm_bindgen::prelude::wasm_bindgen;
 use yrs::block::{EmbedPrelim, ItemContent, Prelim, Unused};
@@ -31,8 +31,11 @@ use yrs::{
 
 #[wasm_bindgen(module = "/js/reflection.js")]
 extern "C" {
-    #[wasm_bindgen(js_name = getTypeJs)]
+    #[wasm_bindgen(js_name = "getTypeJs")]
     fn get_type_js(target: &JsValue) -> u8;
+
+    #[wasm_bindgen(js_name = "getWasmPtr", catch)]
+    fn get_wasm_ptr(target: &JsValue) -> Result<f64>;
 }
 
 #[repr(transparent)]
@@ -550,7 +553,7 @@ impl Callback for js_sys::Function {}
 pub(crate) mod convert {
     use crate::array::YArrayEvent;
     use crate::js::errors::INVALID_DELTA;
-    use crate::js::Js;
+    use crate::js::{get_wasm_ptr, Js};
     use crate::map::YMapEvent;
     use crate::text::YTextEvent;
     use crate::weak::YWeakLinkEvent;
@@ -592,10 +595,7 @@ pub(crate) mod convert {
     where
         T: RefMutFromWasmAbi<Abi = u32>,
     {
-        let ptr = js_sys::Reflect::get(&js, &JsValue::from_str(crate::js::JS_PTR))?;
-        let ptr_u32 =
-            ptr.as_f64()
-                .ok_or(JsValue::from_str(crate::js::errors::NOT_WASM_OBJ))? as u32;
+        let ptr_u32 = get_wasm_ptr(js).ok().ok_or(JsValue::from_str(crate::js::errors::NOT_WASM_OBJ))? as u32;
         let target = unsafe { T::ref_mut_from_abi(ptr_u32) };
         Ok(target)
     }
