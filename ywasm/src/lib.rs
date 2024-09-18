@@ -43,6 +43,11 @@ pub use crate::undo::YUndoManager as UndoManager;
 pub use crate::weak::YWeakLink as WeakLink;
 pub use crate::weak::YWeakLinkEvent as WeakLinkEvent;
 
+// SAFETY: The runtime environment must be single-threaded WASM.
+#[cfg(all(target_family = "wasm"))]
+#[global_allocator]
+static ALLOCATOR: talc::TalckWasm = unsafe { talc::TalckWasm::new_global() };
+
 /// When called will call console log errors whenever internal panic is called from within
 /// WebAssembly module.
 #[wasm_bindgen(js_name = setPanicHook)]
