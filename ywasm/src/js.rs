@@ -8,14 +8,14 @@ use crate::xml_elem::YXmlElement;
 use crate::xml_frag::YXmlFragment;
 use crate::xml_text::YXmlText;
 use crate::Result;
-use js_sys::Uint8Array;
+use js_sys::{JsString, Uint8Array};
 use std::collections::{Bound, HashMap};
 use std::convert::TryInto;
 use std::ops::{Deref, RangeBounds};
 use std::sync::Arc;
 use wasm_bindgen::__rt::RefMut;
 use wasm_bindgen::convert::{FromWasmAbi, IntoWasmAbi, RefMutFromWasmAbi};
-use wasm_bindgen::JsValue;
+use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen::prelude::wasm_bindgen;
 use yrs::block::{EmbedPrelim, ItemContent, Prelim, Unused};
 use yrs::branch::{Branch, BranchPtr};
@@ -35,7 +35,7 @@ extern "C" {
     fn get_type_js(target: &JsValue) -> u8;
 
     #[wasm_bindgen(js_name = "getWasmPtr", catch)]
-    fn get_wasm_ptr(target: &JsValue) -> Result<f64>;
+    pub fn get_wasm_ptr(target: &JsValue) -> Result<f64>;
 }
 
 #[repr(transparent)]
