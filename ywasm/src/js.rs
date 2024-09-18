@@ -129,9 +129,7 @@ impl Js {
     }
 
     pub fn as_value(&self) -> Result<ValueRef> {
-        if let Some(str) = self.0.as_string() {
-            Ok(ValueRef::Any(Any::from(str)))
-        } else if self.0.is_null() {
+        if self.0.is_null() {
             Ok(ValueRef::Any(Any::Null))
         } else if self.0.is_undefined() {
             Ok(ValueRef::Any(Any::Undefined))
@@ -139,6 +137,8 @@ impl Js {
             Ok(ValueRef::Any(Any::Number(f)))
         } else if let Some(b) = self.0.as_bool() {
             Ok(ValueRef::Any(Any::Bool(b)))
+        } else if let Some(js_str) = self.0.dyn_ref::<JsString>() {
+            Ok(ValueRef::Any(Any::from(js_str.as_string().unwrap())))
         } else if self.0.is_bigint() {
             let i = js_sys::BigInt::from(self.0.clone()).as_f64().unwrap();
             Ok(ValueRef::Any(Any::BigInt(i as i64)))
