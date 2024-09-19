@@ -8,13 +8,14 @@ use crate::xml_elem::YXmlElement;
 use crate::xml_frag::YXmlFragment;
 use crate::xml_text::YXmlText;
 use crate::Result;
-use js_sys::{JsString, Uint8Array};
+use js_sys::{Uint8Array};
 use std::collections::{Bound, HashMap};
 use std::convert::TryInto;
 use std::ops::{Deref, RangeBounds};
 use std::sync::Arc;
+use gloo_utils::format::JsValueSerdeExt;
 use wasm_bindgen::__rt::RefMut;
-use wasm_bindgen::convert::{FromWasmAbi, IntoWasmAbi, RefMutFromWasmAbi};
+use wasm_bindgen::convert::{FromWasmAbi, IntoWasmAbi, WasmAbi, WasmSlice};
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen::prelude::wasm_bindgen;
 use yrs::block::{EmbedPrelim, ItemContent, Prelim, Unused};
@@ -36,6 +37,10 @@ extern "C" {
 
     #[wasm_bindgen(js_name = "getWasmPtr", catch)]
     pub fn get_wasm_ptr(target: &JsValue) -> Result<f64>;
+
+    #[wasm_bindgen(js_name = "handleAsValue")]
+    fn handle_as_value(target: &JsValue, x: &mut dyn FnMut(u32, f64));
+
 }
 
 #[repr(transparent)]
@@ -129,58 +134,71 @@ impl Js {
     }
 
     pub fn as_value(&self) -> Result<ValueRef> {
-        if self.0.is_null() {
-            Ok(ValueRef::Any(Any::Null))
-        } else if self.0.is_undefined() {
-            Ok(ValueRef::Any(Any::Undefined))
-        } else if let Some(f) = self.0.as_f64() {
-            Ok(ValueRef::Any(Any::Number(f)))
-        } else if let Some(b) = self.0.as_bool() {
-            Ok(ValueRef::Any(Any::Bool(b)))
-        } else if let Some(js_str) = self.0.dyn_ref::<JsString>() {
-            Ok(ValueRef::Any(Any::from(js_str.as_string().unwrap())))
-        } else if self.0.is_bigint() {
-            let i = js_sys::BigInt::from(self.0.clone()).as_f64().unwrap();
-            Ok(ValueRef::Any(Any::BigInt(i as i64)))
-        } else if js_sys::Array::is_array(&self.0) {
-            let array = js_sys::Array::from(&self.0);
-            let mut result = Vec::with_capacity(array.length() as usize);
-            for value in array.iter() {
-                let js = Js::from(value);
-                if let ValueRef::Any(any) = js.as_value()? {
-                    result.push(any);
-                } else {
-                    return Err(js.0);
-                }
-            }
-            Ok(ValueRef::Any(Any::Array(result.into())))
-        } else if self.0.is_object() {
-            if let Ok(shared) = Shared::from_ref(&self.0) {
-                Ok(ValueRef::Shared(shared))
-            } else {
-                let mut map = HashMap::new();
-                let object = js_sys::Object::from(self.0.clone());
-                let entries = js_sys::Object::entries(&object);
-                for tuple in entries.iter() {
-                    let tuple = js_sys::Array::from(&tuple);
-                    let key: String = if let Some(key) = tuple.get(0).as_string() {
-                        key
+        let mut result: Result<crate::js::ValueRef> = Err(self.0.clone());
+
+        handle_as_value(&self.0, &mut |in_type: u32, value: f64| {
+            if in_type == 0 {
+                result = Ok(ValueRef::Any(Any::Undefined));
+            } else if in_type == 1 {
+                result = Ok(ValueRef::Any(Any::Null))
+            } else if in_type == 2 {
+                result = Ok(ValueRef::Any(Any::Number(value)))
+            } else if in_type == 3 {
+                result = Ok(ValueRef::Any(Any::Bool(if value > 0.0 { true } else { false })))
+            } else if in_type == 4 {
+                let i = value;
+                result = Ok(ValueRef::Any(Any::BigInt(i as i64)))
+            } else if in_type == 5 {
+                result = Ok(ValueRef::Any(Any::from(self.0.as_string().unwrap())))
+            } else if in_type == 6 {
+                let array = self.0.dyn_ref::<js_sys::Array>().unwrap();
+                let mut vec_result = Vec::with_capacity(array.length() as usize);
+                for value in array.iter() {
+                    let js = Js::from(value);
+                    // FIXME!!: this was js.as_value()? before! the else statement doesn't work!
+                    if let ValueRef::Any(any) = js.as_value().unwrap() {
+                        vec_result.push(any);
                     } else {
-                        return Err(JsValue::from_str("object field name is not string"));
-                    };
-                    let value = tuple.get(1);
-                    let js = Js(value.clone());
-                    if let ValueRef::Any(any) = js.as_value()? {
-                        map.insert(key, any);
-                    } else {
-                        return Err(value);
+                        result = Err(js.0);
+                        break;
                     }
                 }
-                Ok(ValueRef::Any(Any::Map(Arc::new(map))))
+                result = Ok(ValueRef::Any(Any::Array(vec_result.into())))
+            } else if in_type == 7 {
+                if let Ok(shared) = Shared::from_ref(&self.0) {
+                    result = Ok(ValueRef::Shared(shared))
+                } else {
+                    let object = js_sys::Object::from(self.0.clone());
+                    let entries = js_sys::Object::entries(&object);
+
+                    let iterator = entries.iter();
+                    let mut map = HashMap::with_capacity(iterator.len());
+
+                    for tuple in iterator {
+                        let tuple = js_sys::Array::from(&tuple);
+                        let key: String = if let Some(key) = tuple.get(0).as_string() {
+                            key
+                        } else {
+                            result = Err(self.0.clone());
+                            break;
+                        };
+                        let value = tuple.get(1);
+                        let js = Js(value.clone());
+                        // FIXME!!: this was js.as_value()? before! the else statement doesn't work!
+                        if let ValueRef::Any(any) = js.as_value().unwrap() {
+                            map.insert(key, any);
+                        } else {
+                            result = Err(value);
+                            break;
+                        }
+                    }
+                    result = Ok(ValueRef::Any(Any::Map(Arc::new(map))))
+                }
             }
-        } else {
-            Err(self.0.clone())
-        }
+        });
+
+
+        result
     }
 }
 
