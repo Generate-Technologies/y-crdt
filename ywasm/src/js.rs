@@ -613,7 +613,7 @@ pub(crate) mod convert {
     where
         T: RefMutFromWasmAbi<Abi = u32>,
     {
-        let ptr_u32 = get_wasm_ptr(js).ok().ok_or(JsValue::from_str(crate::js::errors::NOT_WASM_OBJ))? as u32;
+        let ptr_u32 = get_wasm_ptr(js).ok().unwrap() as u32;
         let target = unsafe { T::ref_mut_from_abi(ptr_u32) };
         Ok(target)
     }
