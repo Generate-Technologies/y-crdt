@@ -134,7 +134,7 @@ impl Js {
     }
 
     pub fn as_value(&self) -> Result<ValueRef> {
-        let mut result: Result<crate::js::ValueRef> = Err(self.0.clone());
+        let mut result: Result<crate::js::ValueRef> = Err(JsValue::UNDEFINED);
 
         handle_as_value(&self.0, &mut |in_type: u32, value: f64| {
             if in_type == 0 {
@@ -153,17 +153,23 @@ impl Js {
             } else if in_type == 6 {
                 let array = self.0.dyn_ref::<js_sys::Array>().unwrap();
                 let mut vec_result = Vec::with_capacity(array.length() as usize);
+
+                let mut failed = false;
                 for value in array.iter() {
                     let js = Js::from(value);
                     // FIXME!!: this was js.as_value()? before! the else statement doesn't work!
                     if let ValueRef::Any(any) = js.as_value().unwrap() {
                         vec_result.push(any);
                     } else {
-                        result = Err(js.0);
+                        result = Err(js.0.clone());
+                        failed = true;
                         break;
                     }
                 }
-                result = Ok(ValueRef::Any(Any::Array(vec_result.into())))
+
+                if !failed {
+                    result = Ok(ValueRef::Any(Any::Array(vec_result.into())));
+                }
             } else if in_type == 7 {
                 if let Ok(shared) = Shared::from_ref(&self.0) {
                     result = Ok(ValueRef::Shared(shared))
@@ -174,14 +180,18 @@ impl Js {
                     let iterator = entries.iter();
                     let mut map = HashMap::with_capacity(iterator.len());
 
+                    let mut failed = false;
+
                     for tuple in iterator {
                         let tuple = js_sys::Array::from(&tuple);
                         let key: String = if let Some(key) = tuple.get(0).as_string() {
                             key
                         } else {
                             result = Err(self.0.clone());
+                            failed = true;
                             break;
                         };
+
                         let value = tuple.get(1);
                         let js = Js(value.clone());
                         // FIXME!!: this was js.as_value()? before! the else statement doesn't work!
@@ -189,10 +199,13 @@ impl Js {
                             map.insert(key, any);
                         } else {
                             result = Err(value);
+                            failed = true;
                             break;
                         }
                     }
-                    result = Ok(ValueRef::Any(Any::Map(Arc::new(map))))
+                    if !failed {
+                        result = Ok(ValueRef::Any(Any::Map(Arc::new(map))))
+                    }
                 }
             }
         });
