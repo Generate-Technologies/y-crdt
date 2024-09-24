@@ -157,14 +157,23 @@ impl Js {
                 let mut failed = false;
                 for value in array.iter() {
                     let js = Js::from(value);
-                    // FIXME!!: this was js.as_value()? before! the else statement doesn't work!
-                    if let ValueRef::Any(any) = js.as_value().unwrap() {
-                        vec_result.push(any);
-                    } else {
-                        result = Err(js.0.clone());
-                        failed = true;
-                        break;
+
+                    match js.as_value() {
+                        Ok(ValueRef::Any(any)) => {
+                            vec_result.push(any);
+                        }
+                        Ok(_) => {
+                            result = Err(js.0.clone());
+                            failed = true;
+                            break;
+                        }
+                        Err(_) => {
+                            result = Err(js.0.clone());
+                            failed = true;
+                            break;
+                        }
                     }
+
                 }
 
                 if !failed {
@@ -194,15 +203,24 @@ impl Js {
 
                         let value = tuple.get(1);
                         let js = Js(value.clone());
-                        // FIXME!!: this was js.as_value()? before! the else statement doesn't work!
-                        if let ValueRef::Any(any) = js.as_value().unwrap() {
-                            map.insert(key, any);
-                        } else {
-                            result = Err(value);
-                            failed = true;
-                            break;
+
+                        match js.as_value() {
+                            Ok(ValueRef::Any(any)) => {
+                                map.insert(key, any);
+                            }
+                            Ok(_) => {
+                                result = Err(value);
+                                failed = true;
+                                break;
+                            }
+                            Err(_) => {
+                                result = Err(value);
+                                failed = true;
+                                break;
+                            }
                         }
                     }
+
                     if !failed {
                         result = Ok(ValueRef::Any(Any::Map(Arc::new(map))))
                     }
