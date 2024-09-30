@@ -144,7 +144,7 @@ impl Js {
             } else if in_type == 2 {
                 result = Ok(ValueRef::Any(Any::Number(value)))
             } else if in_type == 3 {
-                result = Ok(ValueRef::Any(Any::Bool(if value > 0.0 { true } else { false })))
+                result = Ok(ValueRef::Any(Any::Bool(value > 0.0)))
             } else if in_type == 4 {
                 let i = value;
                 result = Ok(ValueRef::Any(Any::BigInt(i as i64)))
