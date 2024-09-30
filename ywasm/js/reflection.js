@@ -1,5 +1,7 @@
 // See js.rs #[wasm_bindgen(module = "/js/reflection.js")]
 
+const JS_PTR = "__wbg_ptr";
+
 export function getWasmPtr(target) {
     const ptr = target[JS_PTR];
 
