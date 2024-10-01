@@ -578,11 +578,23 @@ impl DeleteSet {
                 let mut si =
                     (blocks.len() - 1).min(1 + blocks.find_pivot(r.end - 1).unwrap_or_default());
                 let mut block = &blocks[si];
+
+                let mut start = usize::MAX;
+                let mut end = usize::MIN;
+
                 while si > 0 && block.clock_start() >= r.start {
+                    start = std::cmp::min(start, si);
+                    end = std::cmp::max(end, si);
                     blocks.squash_left(si);
+
                     si -= 1;
                     block = &blocks[si];
                 }
+
+                // Range based squash to avoid constant Vec realloaction.
+                // TODO: needs to be aware of what kind of range compaction to perform as there are GC cells and Block cell.
+                // ensure range indices perfectly match between singular and range based approach
+                // blocks.squash_left_range(start..end);
             }
         }
     }

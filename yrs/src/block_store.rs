@@ -7,7 +7,7 @@ use crate::*;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
-use std::ops::{Index, IndexMut};
+use std::ops::{Index, IndexMut, Range, RangeInclusive};
 use std::vec::Vec;
 
 /// A resizable list of blocks inserted by a single client.
@@ -124,6 +124,22 @@ impl ClientBlockList {
         ClientBlockListIter(self.list.iter())
     }
 
+    pub(crate) fn squash_left_range(&mut self, range: Range<usize>) {
+        let index = range.start;
+        self.list.drain(range);
+
+        let (l, r) = self.list.split_at_mut(index);
+        let left = &mut l[index - 1];
+        let right = &mut r[0];
+        match (left, right) {
+            (BlockCell::GC(left), BlockCell::GC(right)) => {
+                println!("range: {} set to right.end {}", left.end, right.end);
+                left.end = right.end;
+            }
+            _ => { /* cannot squash incompatible types */ }
+        }
+    }
+
     /// Attempts to squash block at a given `index` with a corresponding block on its left side.
     /// If this succeeds, block under a given `index` will be removed, and its contents will be
     /// squashed into its left neighbor. In such case a squash result will be returned in order to
@@ -135,12 +151,14 @@ impl ClientBlockList {
         let right = &mut r[0];
         match (left, right) {
             (BlockCell::GC(left), BlockCell::GC(right)) => {
+                println!("GC: {} set to right.end {}", left.end, right.end);
                 left.end = right.end;
                 self.list.remove(index);
             }
             (BlockCell::Block(left), BlockCell::Block(right)) => {
                 let mut left = ItemPtr::from(left);
                 let right = ItemPtr::from(right);
+                println!("Block");
                 if left.try_squash(right) {
                     if let Some(key) = right.parent_sub.as_deref() {
                         if let TypePtr::Branch(mut parent) = right.parent {
