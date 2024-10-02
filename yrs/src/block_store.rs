@@ -5,9 +5,9 @@ use crate::types::TypePtr;
 use crate::utils::client_hasher::ClientHasher;
 use crate::*;
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{HashMap};
 use std::hash::BuildHasherDefault;
-use std::ops::{Index, IndexMut};
+use std::ops::{Index, IndexMut, RangeInclusive};
 use std::vec::Vec;
 
 /// A resizable list of blocks inserted by a single client.
@@ -123,6 +123,50 @@ impl ClientBlockList {
     pub fn iter(&self) -> ClientBlockListIter<'_> {
         ClientBlockListIter(self.list.iter())
     }
+
+    pub(crate) fn squash_left_range(&mut self, indices_range: RangeInclusive<usize>) {
+        assert!(indices_range.start() <= indices_range.end());
+
+        let mut keep_indices: Vec<usize> = Vec::new();
+        for index in indices_range.clone().rev() {
+            let (l, r) = self.list.split_at_mut(index);
+            let left = &mut l[index - 1];
+            let right = &mut r[0];
+            match (left, right) {
+                (BlockCell::GC(left), BlockCell::GC(right)) => {
+                    left.end = right.end;
+                },
+                (BlockCell::Block(left), BlockCell::Block(right)) => {
+                    panic!("squash_left_range blockcell mismatch");
+                }
+                _ => {
+                    // Usually GC and Block combinations, can't be squashed!
+                    keep_indices.push(index);
+                }
+            }
+        }
+
+        if (keep_indices.len() > 0) {
+            // Remove around keep indices
+            let mut block_start = *indices_range.start();
+            for &block_end in keep_indices.iter().rev() {
+                let block_end_exclusive = block_end - 1;
+                if (block_start < block_end_exclusive) {
+                    self.list.drain(block_start..block_end_exclusive);
+                    block_start = block_end + 1;
+                }
+            }
+
+            let last_index = self.list.len() - 1;
+            if (block_start < last_index) {
+                // Remove the last block
+                self.list.drain(block_start..=last_index);
+            }
+        } else {
+            self.list.drain(indices_range);
+        }
+    }
+
 
     /// Attempts to squash block at a given `index` with a corresponding block on its left side.
     /// If this succeeds, block under a given `index` will be removed, and its contents will be
