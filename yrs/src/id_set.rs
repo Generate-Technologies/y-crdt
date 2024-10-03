@@ -580,6 +580,7 @@ impl DeleteSet {
 
                 let mut valid_range: Range<usize> = Range { start: usize::MAX, end: usize::MIN };
                 while si > 0 && block.clock_start() >= r.start {
+                    blocks.squash_left(si);
                     valid_range.start = std::cmp::min(si, valid_range.start);
                     valid_range.end = std::cmp::max(si, valid_range.end);
                     si -= 1;
@@ -587,10 +588,10 @@ impl DeleteSet {
                 }
 
                 if valid_range.start != usize::MAX && valid_range.end != usize::MIN {
-                    blocks.squash_left_range(RangeInclusive::new(valid_range.start, valid_range.end));
-                } else {
-                    panic!("No valid range found when performing BlockCell GC ranged squash");
+                    // blocks.squash_left_range(RangeInclusive::new(valid_range.start, valid_range.end));
                 }
+
+                blocks.print_remainders();
             }
         }
     }

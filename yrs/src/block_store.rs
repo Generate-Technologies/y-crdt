@@ -7,7 +7,7 @@ use crate::*;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap};
 use std::hash::BuildHasherDefault;
-use std::ops::{Index, IndexMut, RangeInclusive};
+use std::ops::{Index, IndexMut, Range, RangeInclusive};
 use std::vec::Vec;
 
 /// A resizable list of blocks inserted by a single client.
@@ -124,47 +124,60 @@ impl ClientBlockList {
         ClientBlockListIter(self.list.iter())
     }
 
+    pub(crate) fn print_remainders(&self) {
+        println!("list size is {}", self.list.len());
+    }
+
     pub(crate) fn squash_left_range(&mut self, indices_range: RangeInclusive<usize>) {
         assert!(indices_range.start() <= indices_range.end());
 
-        let mut keep_indices: Vec<usize> = Vec::new();
-        for index in indices_range.clone().rev() {
-            let (l, r) = self.list.split_at_mut(index);
-            let left = &mut l[index - 1];
+        let mut remove_intervals: Vec<Range<usize>> = Vec::new();
+        remove_intervals.push(Range { start: *indices_range.end(), end: *indices_range.end() });
+
+        let mut remove_index = |index: usize| {
+            if (remove_intervals.last_mut().unwrap().start - 1 == index) {
+                remove_intervals.last_mut().unwrap().start = index;
+            } else {
+                remove_intervals.push(Range { start: index, end: index });
+            }
+        };
+
+        for right_index in indices_range.clone().rev() {
+            let (l, r) = self.list.split_at_mut(right_index);
+            let left = &mut l[right_index - 1];
             let right = &mut r[0];
             match (left, right) {
                 (BlockCell::GC(left), BlockCell::GC(right)) => {
                     left.end = right.end;
-                },
+                    remove_index(right_index);
+
+                }
                 (BlockCell::Block(left), BlockCell::Block(right)) => {
-                    panic!("squash_left_range blockcell mismatch");
+                    let mut left = ItemPtr::from(left);
+                    let right = ItemPtr::from(right);
+                    if left.try_squash(right) {
+                        if let Some(key) = right.parent_sub.as_deref() {
+                            if let TypePtr::Branch(mut parent) = right.parent {
+                                if let Some(e) = parent.map.get_mut(key) {
+                                    if right == *e {
+                                        *e = ItemPtr::from(left);
+                                    }
+                                }
+                            }
+                        }
+                        remove_index(right_index);
+                    }
                 }
-                _ => {
-                    // Usually GC and Block combinations, can't be squashed!
-                    keep_indices.push(index);
-                }
+                _ => { /* cannot squash incompatible types */ }
             }
         }
 
-        if (keep_indices.len() > 0) {
-            // Remove around keep indices
-            let mut block_start = *indices_range.start();
-            for &block_end in keep_indices.iter().rev() {
-                let block_end_exclusive = block_end - 1;
-                if (block_start < block_end_exclusive) {
-                    self.list.drain(block_start..block_end_exclusive);
-                    block_start = block_end + 1;
-                }
-            }
 
-            let last_index = self.list.len() - 1;
-            if (block_start < last_index) {
-                // Remove the last block
-                self.list.drain(block_start..=last_index);
-            }
-        } else {
-            self.list.drain(indices_range);
+        for interval in remove_intervals {
+            self.list.drain(interval);
         }
+
+        println!("test");
     }
 
 
@@ -174,7 +187,7 @@ impl ClientBlockList {
     /// later on rewire left/right neighbor changes that may have occurred as a result of squashing
     /// and block removal.
     pub(crate) fn squash_left(&mut self, index: usize) {
-        let (l, r) = self.list.split_at_mut(index);
+        let (l, r) =  self.list.split_at_mut(index);
         let left = &mut l[index - 1];
         let right = &mut r[0];
         match (left, right) {
