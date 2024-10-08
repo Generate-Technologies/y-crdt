@@ -8,14 +8,16 @@ use crate::xml_elem::YXmlElement;
 use crate::xml_frag::YXmlFragment;
 use crate::xml_text::YXmlText;
 use crate::Result;
-use js_sys::Uint8Array;
+use js_sys::{Uint8Array};
 use std::collections::{Bound, HashMap};
 use std::convert::TryInto;
 use std::ops::{Deref, RangeBounds};
 use std::sync::Arc;
+use gloo_utils::format::JsValueSerdeExt;
 use wasm_bindgen::__rt::RefMut;
-use wasm_bindgen::convert::{FromWasmAbi, IntoWasmAbi};
-use wasm_bindgen::JsValue;
+use wasm_bindgen::convert::{FromWasmAbi, IntoWasmAbi, WasmAbi, WasmSlice};
+use wasm_bindgen::{JsCast, JsValue};
+use wasm_bindgen::prelude::wasm_bindgen;
 use yrs::block::{EmbedPrelim, ItemContent, Prelim, Unused};
 use yrs::branch::{Branch, BranchPtr};
 use yrs::types::xml::XmlPrelim;
@@ -27,6 +29,19 @@ use yrs::{
     Any, ArrayRef, BranchID, Doc, Map, MapRef, Origin, Out, Text, TextRef, TransactionMut, WeakRef,
     Xml, XmlElementRef, XmlFragment, XmlFragmentRef, XmlOut, XmlTextRef,
 };
+
+#[wasm_bindgen(module = "/js/reflection.js")]
+extern "C" {
+    #[wasm_bindgen(js_name = "getTypeJs")]
+    fn get_type_js(target: &JsValue) -> u8;
+
+    #[wasm_bindgen(js_name = "getWasmPtr", catch)]
+    pub fn get_wasm_ptr(target: &JsValue) -> Result<f64>;
+
+    #[wasm_bindgen(js_name = "handleAsValue")]
+    fn handle_as_value(target: &JsValue, x: &mut dyn FnMut(u32, f64));
+
+}
 
 #[repr(transparent)]
 pub struct Js(JsValue);
@@ -50,9 +65,9 @@ impl Js {
     }
 
     pub fn get_type(js: &JsValue) -> crate::Result<u8> {
-        let tag = js_sys::Reflect::get(js, &JsValue::from_str("type"))?;
-        if let Some(tag) = tag.as_f64() {
-            Ok(tag as u8)
+        let tag = get_type_js(js);
+        if tag != 255 {
+            Ok(tag)
         } else {
             Err(js.clone())
         }
@@ -119,58 +134,102 @@ impl Js {
     }
 
     pub fn as_value(&self) -> Result<ValueRef> {
-        if let Some(str) = self.0.as_string() {
-            Ok(ValueRef::Any(Any::from(str)))
-        } else if self.0.is_null() {
-            Ok(ValueRef::Any(Any::Null))
-        } else if self.0.is_undefined() {
-            Ok(ValueRef::Any(Any::Undefined))
-        } else if let Some(f) = self.0.as_f64() {
-            Ok(ValueRef::Any(Any::Number(f)))
-        } else if let Some(b) = self.0.as_bool() {
-            Ok(ValueRef::Any(Any::Bool(b)))
-        } else if self.0.is_bigint() {
-            let i = js_sys::BigInt::from(self.0.clone()).as_f64().unwrap();
-            Ok(ValueRef::Any(Any::BigInt(i as i64)))
-        } else if js_sys::Array::is_array(&self.0) {
-            let array = js_sys::Array::from(&self.0);
-            let mut result = Vec::with_capacity(array.length() as usize);
-            for value in array.iter() {
-                let js = Js::from(value);
-                if let ValueRef::Any(any) = js.as_value()? {
-                    result.push(any);
-                } else {
-                    return Err(js.0);
+        let mut result: Result<crate::js::ValueRef> = Err(JsValue::UNDEFINED);
+
+        handle_as_value(&self.0, &mut |in_type: u32, value: f64| {
+            if in_type == 0 {
+                result = Ok(ValueRef::Any(Any::Undefined));
+            } else if in_type == 1 {
+                result = Ok(ValueRef::Any(Any::Null))
+            } else if in_type == 2 {
+                result = Ok(ValueRef::Any(Any::Number(value)))
+            } else if in_type == 3 {
+                result = Ok(ValueRef::Any(Any::Bool(value > 0.0)))
+            } else if in_type == 4 {
+                let i = value;
+                result = Ok(ValueRef::Any(Any::BigInt(i as i64)))
+            } else if in_type == 5 {
+                result = Ok(ValueRef::Any(Any::from(self.0.as_string().unwrap())))
+            } else if in_type == 6 {
+                let array = self.0.dyn_ref::<js_sys::Array>().unwrap();
+                let mut vec_result = Vec::with_capacity(array.length() as usize);
+
+                let mut failed = false;
+                for value in array.iter() {
+                    let js = Js::from(value);
+
+                    match js.as_value() {
+                        Ok(ValueRef::Any(any)) => {
+                            vec_result.push(any);
+                        }
+                        Ok(_) => {
+                            result = Err(js.0.clone());
+                            failed = true;
+                            break;
+                        }
+                        Err(_) => {
+                            result = Err(js.0.clone());
+                            failed = true;
+                            break;
+                        }
+                    }
+
                 }
-            }
-            Ok(ValueRef::Any(Any::Array(result.into())))
-        } else if self.0.is_object() {
-            if let Ok(shared) = Shared::from_ref(&self.0) {
-                Ok(ValueRef::Shared(shared))
-            } else {
-                let mut map = HashMap::new();
-                let object = js_sys::Object::from(self.0.clone());
-                let entries = js_sys::Object::entries(&object);
-                for tuple in entries.iter() {
-                    let tuple = js_sys::Array::from(&tuple);
-                    let key: String = if let Some(key) = tuple.get(0).as_string() {
-                        key
-                    } else {
-                        return Err(JsValue::from_str("object field name is not string"));
-                    };
-                    let value = tuple.get(1);
-                    let js = Js(value.clone());
-                    if let ValueRef::Any(any) = js.as_value()? {
-                        map.insert(key, any);
-                    } else {
-                        return Err(value);
+
+                if !failed {
+                    result = Ok(ValueRef::Any(Any::Array(vec_result.into())));
+                }
+            } else if in_type == 7 {
+                if let Ok(shared) = Shared::from_ref(&self.0) {
+                    result = Ok(ValueRef::Shared(shared))
+                } else {
+                    let object = js_sys::Object::from(self.0.clone());
+                    let entries = js_sys::Object::entries(&object);
+
+                    let iterator = entries.iter();
+                    let mut map = HashMap::with_capacity(iterator.len());
+
+                    let mut failed = false;
+
+                    for tuple in iterator {
+                        let tuple = js_sys::Array::from(&tuple);
+                        let key: String = if let Some(key) = tuple.get(0).as_string() {
+                            key
+                        } else {
+                            result = Err(self.0.clone());
+                            failed = true;
+                            break;
+                        };
+
+                        let value = tuple.get(1);
+                        let js = Js(value.clone());
+
+                        match js.as_value() {
+                            Ok(ValueRef::Any(any)) => {
+                                map.insert(key, any);
+                            }
+                            Ok(_) => {
+                                result = Err(value);
+                                failed = true;
+                                break;
+                            }
+                            Err(_) => {
+                                result = Err(value);
+                                failed = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if !failed {
+                        result = Ok(ValueRef::Any(Any::Map(Arc::new(map))))
                     }
                 }
-                Ok(ValueRef::Any(Any::Map(Arc::new(map))))
             }
-        } else {
-            Err(self.0.clone())
-        }
+        });
+
+
+        result
     }
 }
 
@@ -543,7 +602,7 @@ impl Callback for js_sys::Function {}
 pub(crate) mod convert {
     use crate::array::YArrayEvent;
     use crate::js::errors::INVALID_DELTA;
-    use crate::js::Js;
+    use crate::js::{get_wasm_ptr, Js};
     use crate::map::YMapEvent;
     use crate::text::YTextEvent;
     use crate::weak::YWeakLinkEvent;
@@ -585,10 +644,7 @@ pub(crate) mod convert {
     where
         T: RefMutFromWasmAbi<Abi = u32>,
     {
-        let ptr = js_sys::Reflect::get(&js, &JsValue::from_str(crate::js::JS_PTR))?;
-        let ptr_u32 =
-            ptr.as_f64()
-                .ok_or(JsValue::from_str(crate::js::errors::NOT_WASM_OBJ))? as u32;
+        let ptr_u32 = get_wasm_ptr(js).ok().unwrap() as u32;
         let target = unsafe { T::ref_mut_from_abi(ptr_u32) };
         Ok(target)
     }

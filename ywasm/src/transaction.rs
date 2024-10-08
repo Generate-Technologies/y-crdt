@@ -86,11 +86,7 @@ impl YTransaction {
         if abi == 0 {
             Err(JsValue::from_str(crate::js::errors::NON_TRANSACTION))
         } else {
-            let ptr = js_sys::Reflect::get(&value, &JsValue::from_str(crate::js::JS_PTR))?;
-            let ptr_u32 = ptr
-                .as_f64()
-                .ok_or(JsValue::from_str(crate::js::errors::NOT_WASM_OBJ))?
-                as u32;
+            let ptr_u32 = crate::js::get_wasm_ptr(value).ok().ok_or(JsValue::from_str(crate::js::errors::NOT_WASM_OBJ))? as u32;
             let target = unsafe { YTransaction::ref_mut_from_abi(ptr_u32) };
             Ok(target)
         }
