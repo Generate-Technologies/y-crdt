@@ -41,6 +41,8 @@ extern "C" {
     #[wasm_bindgen(js_name = "handleAsValue")]
     fn handle_as_value(target: &JsValue, x: &mut dyn FnMut(u32, f64));
 
+    #[wasm_bindgen(js_name = "fillAsValueString")]
+    fn fill_as_value_string(ptr: *mut u8);
 }
 
 #[repr(transparent)]
@@ -149,7 +151,12 @@ impl Js {
                 let i = value;
                 result = Ok(ValueRef::Any(Any::BigInt(i as i64)))
             } else if in_type == 5 {
-                result = Ok(ValueRef::Any(Any::from(self.0.as_string().unwrap())))
+                let string_capacity = value as usize;
+                let mut buffer = String::with_capacity(string_capacity);
+                fill_as_value_string(buffer.as_mut_ptr());
+                result = Ok(ValueRef::Any(Any::from(buffer.as_str())))
+                // result = Ok(ValueRef::Any(Any::from(self.0.as_string().unwrap())))
+
             } else if in_type == 6 {
                 let array = self.0.dyn_ref::<js_sys::Array>().unwrap();
                 let mut vec_result = Vec::with_capacity(array.length() as usize);
@@ -173,7 +180,6 @@ impl Js {
                             break;
                         }
                     }
-
                 }
 
                 if !failed {
