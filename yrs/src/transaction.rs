@@ -403,6 +403,11 @@ impl<'doc> TransactionMut<'doc> {
         &self.delete_set
     }
 
+    pub fn compact(&mut self) {
+        let mut ds = DeleteSet::from(&self.store.blocks);
+        ds.try_squash_with(&mut self.store);
+    }
+
     /// Returns origin of the transaction if any was defined. Read-write transactions can get an
     /// origin assigned via [Transact::try_transact_mut_with]/[Transact::transact_mut_with] methods.
     pub fn origin(&self) -> Option<&Origin> {
